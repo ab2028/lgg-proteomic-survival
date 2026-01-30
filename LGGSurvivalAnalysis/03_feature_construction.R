@@ -90,3 +90,62 @@ final_top_proteins <- best_per_factor %>%
   arrange(as.numeric(gsub("Factor", "", Factor)))
 
 print(final_top_proteins)
+
+# --- 3.6 Formatting for LaTeX output ---
+
+final_top_proteins_fmt <- final_top_proteins %>%
+  mutate(
+    # Round loadings
+    Loading = sprintf("%.2f", round(Loading, 2)),
+    
+    # Escape underscores for LaTeX
+    Protein = gsub("_", "\\\\_", Protein),
+    
+    # Format p-values
+    p_value = case_when(
+      p_value < 0.001 ~ "<0.001",
+      TRUE ~ sprintf("%.3f", p_value)
+    )
+  )
+
+# --- 3.7 Build LaTeX table rows ---
+latex_rows <- apply(final_top_proteins_fmt, 1, function(x) {
+  paste0(
+    x["Factor"], " & ",
+    x["Protein"], " & ",
+    x["Loading"], " & ",
+    x["HR_CI"], " & ",
+    x["p_value"], " \\\\"
+  )
+})
+
+# --- 3.8 Full LaTeX table wrapper ---
+latex_table <- c(
+  "\\begin{table}[H]",
+  "\\centering",
+  "\\begin{tabular}{llrlr}",
+  "\\hline",
+  "Factor & Protein & Loading & HR (95\\% CI) & p-value \\\\",
+  "\\hline",
+  latex_rows,
+  "\\hline",
+  "\\end{tabular}",
+  "\\caption{Top protein per factor. Loadings are from factor analysis. Hazard ratios (HR, 95\\% CI) and p-values are from univariate Cox regression.}",
+  "\\label{tab:univariate}",
+  "\\end{table}"
+)
+
+# --- 3.9 Print to console ---
+cat(paste(latex_table, collapse = "\n"))
+
+# --- 3.10 Save to .tex file ---
+# Ensure tables directory exists
+if (!dir.exists("tables")) {
+  dir.create("tables")
+}
+
+# Save LaTeX table
+writeLines(latex_table, "tables/table_univariate_top_proteins.tex")
+
+
+

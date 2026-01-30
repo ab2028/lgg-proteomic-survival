@@ -282,3 +282,65 @@ if (TRUE)
 }
 
 
+# SAVE LATEX TABLE
+
+# Ensure output directory exists
+if (!dir.exists("tables")) dir.create("tables")
+
+# Format helper
+fmt_num <- function(x, digits = 2) {
+  if (is.na(x)) return("---")
+  formatC(x, format = "f", digits = digits)
+}
+
+# Build LaTeX rows
+rows <- c(
+  sprintf(
+    "Cox PH            &   --- &   --- &  --- & %.3f \\\\",
+    final_model_results$C_index[final_model_results$Model == "Cox PH"]
+  ),
+  sprintf(
+    "Weibull           &  %s &  %s &  %s & %.3f \\\\",
+    fmt_num(final_model_results$AIC[2], 2),
+    fmt_num(final_model_results$AICc[2], 2),
+    fmt_num(final_model_results$BIC[2], 2),
+    final_model_results$C_index[2]
+  ),
+  sprintf(
+    "Log-logistic      &  %s &  %s &  %s & %.3f \\\\",
+    fmt_num(final_model_results$AIC[3], 2),
+    fmt_num(final_model_results$AICc[3], 2),
+    fmt_num(final_model_results$BIC[3], 2),
+    final_model_results$C_index[3]
+  ),
+  sprintf(
+    "Generalized gamma &  %s &  %s &  %s & %.3f \\\\",
+    fmt_num(final_model_results$AIC[4], 2),
+    fmt_num(final_model_results$AICc[4], 2),
+    fmt_num(final_model_results$BIC[4], 2),
+    final_model_results$C_index[4]
+  )
+)
+
+# Write LaTeX table
+writeLines(
+  c(
+    "\\begin{table}[H]",
+    "\\centering",
+    "\\begin{tabular}{lrrrr}",
+    "\\hline",
+    "Model & AIC & AICc & BIC & C-index \\\\",
+    "\\hline",
+    rows,
+    "\\hline",
+    "\\end{tabular}",
+    "\\caption{Comparison of reduced survival models after backward elimination. Lower AIC, AICc, and BIC indicate better model fit, while higher C-index indicates better discriminative ability.}",
+    "\\label{tab:reducedc}",
+    "\\end{table}"
+  ),
+  "tables/tab_reducedc.tex"
+)
+
+
+
+

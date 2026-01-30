@@ -2,10 +2,18 @@
 
 library(survival)
 library(survminer)
+library(ggplot2)
+
+# make sure directory exists
+if (!dir.exists("figures")) dir.create("figures")
 
 km <- survfit(Surv(OS.time, OS) ~ 1, data = df_model)
 
-#pdf("km_curve.pdf", width = 6, height = 4.5)
+pdf(
+  file = "figures/km_curve.pdf",
+  width = 6,
+  height = 4.5
+)
 
 p <- ggsurvplot(
   km,
@@ -26,27 +34,26 @@ p <- ggsurvplot(
   legend = "none"
 )
 
+# Modify the ggplot
 p$plot <- p$plot +
-  ggplot2::theme(
-    plot.title = ggplot2::element_text(
-      size = 18,      
+  theme(
+    plot.title = element_text(
+      size = 18,
       face = "bold",
       hjust = 0.5
-    )
-  )
-
-p$plot <- p$plot +
-  ggplot2::theme(
-    axis.title.x = ggplot2::element_text(
-      margin = ggplot2::margin(t = 10)  # space above x-axis title
     ),
-    axis.title.y = ggplot2::element_text(
-      margin = ggplot2::margin(r = 10)  # space to the right of y-axis title
+    axis.title.x = element_text(
+      margin = margin(t = 10)
+    ),
+    axis.title.y = element_text(
+      margin = margin(r = 10)
     )
   )
 
+# save
+print(p$plot)
 
+dev.off()
 
-# dev.off()
-
-print(p)
+# print to plots tab
+print(p$plot)

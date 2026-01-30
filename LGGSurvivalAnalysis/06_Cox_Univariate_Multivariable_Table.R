@@ -4,6 +4,9 @@ library(survival)
 library(dplyr)
 library(broom)
 
+
+# --- 6.1 Prepare Modeling Dataset ---
+
 proteins <- c(final_top_proteins$Protein, "age", "gender")
 
 age_midpoints <- c(
@@ -22,7 +25,7 @@ protein_data_c2$age <- age_midpoints[as.character(protein_data_c2$age)]
 protein_data_c2$age <- as.numeric(protein_data_c2$age)
 
 
-#1
+# --- 6.2 Univariate Table ---
 univ_results <- lapply(proteins, function(prot) {
   
   fml <- as.formula(paste0("Surv(OS.time, OS) ~ `", prot, "`"))
@@ -52,7 +55,7 @@ univ_cox_table <- bind_rows(univ_results) %>%
 print(univ_cox_table)
 
 
-# 2
+# --- 6.3 Multivariate Table ---
 
 multi_formula <- as.formula(
   paste(
@@ -84,6 +87,8 @@ multi_cox_table <- data.frame(
 print(multi_cox_table)
 
 
+# --- 6.4 PH Test (optional) ---
+
 c_index <- multi_summary$concordance
 print(paste0(
   "C-index: ", round(c_index[1], 3),
@@ -109,10 +114,131 @@ global_tests <- data.frame(
   )
 )
 
-print(global_tests)
+# print(global_tests)
 
 
 ph_test <- cox.zph(multi_fit)
-print(ph_test)
+# print(ph_test)
+
+# --- 6.5 Save combined univariate + multivariable Cox table in LaTeX ---
+
+fmt_p <- function(p) {
+  ifelse(p < 0.001, "<0.001", sprintf("%.3f", p))
+}
+
+fmt_hr_ci_p <- function(hr, low, high, p) {
+  paste0(
+    sprintf("%.2f", hr),
+    " (", sprintf("%.2f", low), "--", sprintf("%.2f", high), "), ",
+    fmt_p(p)
+  )
+}
+
+escape_tex <- function(x) {
+  gsub("_", "\\\\_", x)
+}
+
+# --- rebuild UNIVARIATE table from raw univ_results ---
+
+univ_raw <- bind_rows(univ_results)
+
+univ_fmt <- univ_raw %>%
+  mutate(
+    Variable = escape_tex(Protein),
+    Univ = fmt_hr_ci_p(HR, lower95, upper95, p_value)
+  ) %>%
+  select(Variable, Univ)
+
+# --- rebuild multivariable table from multi_summary ---
+
+multi_raw <- data.frame(
+  Variable = rownames(multi_summary$coef),
+  HR = multi_summary$coef[,"exp(coef)"],
+  lower95 = multi_summary$conf.int[,"lower .95"],
+  upper95 = multi_summary$conf.int[,"upper .95"],
+  p_value = multi_summary$coef[,"Pr(>|z|)"],
+  stringsAsFactors = FALSE
+)
+
+multi_fmt <- multi_raw %>%
+  mutate(
+    Variable = escape_tex(Variable),
+    Multi = fmt_hr_ci_p(HR, lower95, upper95, p_value)
+  ) %>%
+  select(Variable, Multi)
+
+# --- combine, preserve univariate order ---
+
+combined_table <- univ_fmt %>%
+  left_join(multi_fmt, by = "Variable") %>%
+  mutate(
+    Multi = ifelse(is.na(Multi), "--", Multi)
+  )
+
+# --- global test stats ---
+
+c_index_val <- round(multi_summary$concordance[1], 3)
+c_index_se  <- round(multi_summary$concordance[2], 3)
+
+lrt   <- multi_summary$logtest
+wald  <- multi_summary$waldtest
+score <- multi_summary$sctest
+
+# --- write and save LaTeX table ---
+
+rows <- apply(combined_table, 1, function(x) {
+  paste(x["Variable"], "&", x["Univ"], "&", x["Multi"], "\\\\")
+})
+
+writeLines(c(
+  "\\begin{table}[H]",
+  "\\centering",
+  "\\caption{Univariate and full multivariable Cox proportional hazards regression results.}",
+  "\\begin{tabular}{lcc}",
+  "\\toprule",
+  "Variable & Univariate HR (95\\% CI), $p$ & Full multivariable HR (95\\% CI), $p$ \\\\",
+  "\\midrule",
+  rows,
+  "\\bottomrule",
+  "\\end{tabular}",
+  "",
+  "\\vspace{0.5em}",
+  "\\footnotesize{",
+  paste0(
+    "Full multivariable model fit statistics: Concordance = ",
+    sprintf("%.3f", c_index_val),
+    " (SE = ",
+    sprintf("%.3f", c_index_se),
+    ")."
+  ),
+  paste0(
+    " Likelihood ratio test = ",
+    round(lrt["test"], 1),
+    " on ",
+    lrt["df"],
+    " df ($p < 0.001$);"
+  ),
+  paste0(
+    " Wald test = ",
+    round(wald["test"], 1),
+    " on ",
+    wald["df"],
+    " df ($p < 0.001$);"
+  ),
+  paste0(
+    " Score (log-rank) test = ",
+    round(score["test"], 1),
+    " on ",
+    score["df"],
+    " df ($p < 0.001$)."
+  ),
+  "}",
+  "\\footnotesize{",
+  "Note: YAP, BAK, EIF4G, and Annexin A7 were excluded from multivariable modeling due to violations of the proportional hazards assumption (see Section 3.1 of paper)",
+  "}",
+  "\\label{tab:cox_all_combined}",
+  "\\end{table}"
+), "tables/table_cox_all_combined.tex")
+
 
 

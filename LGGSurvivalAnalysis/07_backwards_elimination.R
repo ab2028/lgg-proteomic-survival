@@ -4,6 +4,7 @@ library(survival)
 library(flexsurv)
 library(dplyr)
 
+# --- 7.1 ---
 
 # force age and gender
 backward_eliminate <- function(model_type, df, predictor_vars, alpha = 0.05,
@@ -190,6 +191,18 @@ backward_eliminate <- function(model_type, df, predictor_vars, alpha = 0.05,
     )
   )
 }
+
+#newcode
+df_model <- df_model %>%
+  mutate(
+    gender = as.integer(gender == "MALE")
+  )
+
+
+# predictor_vars <- predictor_vars[predictor_vars != "genderMALE"]
+# predictor_vars <- c(predictor_vars, "gender")
+
+
 
 result_cox <- backward_eliminate(
   model_type = "cox",
@@ -390,6 +403,236 @@ gengamma_table <- data.frame(
 print(gengamma_table)
 
 }
+
+
+
+# LATEX TABLE SAVING
+
+if (!dir.exists("tables")) dir.create("tables")
+
+
+sig_stars <- function(p) {
+  ifelse(
+    p < 0.001, "{***}",
+    ifelse(p < 0.01, "{**}",
+           ifelse(p < 0.05, "{*}", ""))
+  )
+}
+
+
+write_reduced_cox_table <- function(result, caption, label) {
+  
+  fit <- result$final_fit
+  sm  <- summary(fit)
+  ci  <- confint(fit)
+  
+  df <- data.frame(
+    Variable = escape_tex(rownames(sm$coef)),
+    Effect_CI = sprintf(
+      "%.3f (%.3f, %.3f)",
+      exp(sm$coef[, "coef"]),
+      exp(ci[, 1]),
+      exp(ci[, 2])
+    ),
+    SE = sprintf("%.3f", sm$coef[, "se(coef)"]),
+    z  = sprintf("%.2f", sm$coef[, "z"]),
+    p  = ifelse(
+      sm$coef[, "Pr(>|z|)"] < 0.001,
+      "$<0.001$",
+      sprintf("%.3f", sm$coef[, "Pr(>|z|)"])
+    ),
+    star = sig_stars(sm$coef[, "Pr(>|z|)"]),
+    stringsAsFactors = FALSE
+  )
+  
+  rows <- apply(df, 1, function(x) {
+    paste(
+      x["Variable"], "&",
+      x["Effect_CI"], "&",
+      x["SE"], "&",
+      x["z"], "&",
+      paste0(x["p"], " ", x["star"]),
+      "\\\\"
+    )
+  })
+  
+  writeLines(c(
+    "\\begin{table}[H]",
+    "\\centering",
+    paste0("\\caption{", caption, "}"),
+    "\\begin{tabular}{",
+    "    l",
+    "    l",
+    "    S[table-format=1.3]",
+    "    S[table-format=-1.2]",
+    "    l",
+    "}",
+    "\\toprule",
+    "\\textbf{Variable} & \\textbf{HR (95\\% CI)} & {\\textbf{SE}} & {\\textbf{z}} & {\\textbf{Pr$(>|z|)$}} \\\\",
+    "\\midrule",
+    rows,
+    "\\bottomrule",
+    "\\multicolumn{5}{l}{\\textsl{Significance codes: p $<$ 0.001 (***), p $<$ 0.01 (**), p $<$ 0.05 (*)}} \\\\",
+    "\\end{tabular}",
+    paste0("\\label{", label, "}"),
+    "\\end{table}"
+  ), paste0("tables/", label, ".tex"))
+}
+
+write_reduced_aft_table <- function(result, caption, label) {
+  
+  fit <- result$final_fit
+  res <- fit$res
+  
+  # use the retained variables from backward elimination
+  covars <- result$final_vars
+  
+  # keep only covariate rows
+  res <- res[rownames(res) %in% covars, , drop = FALSE]
+  
+  if (nrow(res) == 0) {
+    stop("No covariates found for AFT table: ", label)
+  }
+  
+  z <- res[, "est"] / res[, "se"]
+  p <- 2 * (1 - pnorm(abs(z)))
+  
+  etr  <- exp(res[, "est"])
+  low  <- exp(-(res[, "est"] + 1.96 * res[, "se"]))
+  high <- exp(-(res[, "est"] - 1.96 * res[, "se"]))
+  
+  df_out <- data.frame(
+    Variable = escape_tex(rownames(res)),
+    Effect_CI = sprintf("%.3f (%.3f--%.3f)", etr, low, high),
+    SE = sprintf("%.3f", res[, "se"]),
+    z  = sprintf("%.2f", z),
+    p  = ifelse(p < 0.001, "$<0.001$", sprintf("%.3f", p)),
+    star = sig_stars(p),
+    stringsAsFactors = FALSE
+  )
+  
+  rows <- apply(df_out, 1, function(x) {
+    paste(
+      x["Variable"], "&",
+      x["Effect_CI"], "&",
+      x["SE"], "&",
+      x["z"], "&",
+      paste0(x["p"], " ", x["star"]),
+      "\\\\"
+    )
+  })
+  
+  writeLines(c(
+    "\\begin{table}[H]",
+    "\\centering",
+    paste0("\\caption{", caption, "}"),
+    "\\begin{tabular}{l l S[table-format=1.3] S[table-format=-1.2] l}",
+    "\\toprule",
+    "\\textbf{Variable} & \\textbf{ETR (95\\% CI)} & {\\textbf{SE}} & {\\textbf{z}} & {\\textbf{Pr$(>|z|)$}} \\\\",
+    "\\midrule",
+    rows,
+    "\\bottomrule",
+    "\\multicolumn{5}{l}{\\parbox[t]{\\linewidth}{",
+    "\\textsl{Interpretation: ETR $>$ 1 indicates longer survival}\\\\",
+    "\\textsl{Significance codes: *** $p<0.001$, ** $p<0.01$, * $p<0.05$}",
+    "}} \\\\",
+    "\\end{tabular}",
+    paste0("\\label{", label, "}"),
+    "\\end{table}"
+  ), paste0("tables/", label, ".tex"))
+}
+
+
+
+write_reduced_gengamma_table <- function(result, caption, label) {
+  
+  fit <- result$final_fit
+  res <- fit$res
+  
+  drop_params <- intersect(
+    rownames(res),
+    c("shape", "sigma", "Q", "mu")
+  )
+  res <- res[!rownames(res) %in% drop_params, , drop = FALSE]
+  
+  z <- res[, "est"] / res[, "se"]
+  p <- 2 * (1 - pnorm(abs(z)))
+  
+  df <- data.frame(
+    Variable = escape_tex(rownames(res)),
+    Effect_CI = sprintf(
+      "%.3f (%.3f, %.3f)",
+      res[, "est"],
+      res[, "est"] - 1.96 * res[, "se"],
+      res[, "est"] + 1.96 * res[, "se"]
+    ),
+    SE = sprintf("%.3f", res[, "se"]),
+    z  = sprintf("%.2f", z),
+    p  = ifelse(p < 0.001, "$<0.001$", sprintf("%.3f", p)),
+    star = sig_stars(p),
+    stringsAsFactors = FALSE
+  )
+  
+  rows <- apply(df, 1, function(x) {
+    paste(
+      x["Variable"], "&",
+      x["Effect_CI"], "&",
+      x["SE"], "&",
+      x["z"], "&",
+      paste0(x["p"], " ", x["star"]),
+      "\\\\"
+    )
+  })
+  
+  writeLines(c(
+    "\\begin{table}[H]",
+    "\\centering",
+    paste0("\\caption{", caption, "}"),
+    "\\begin{tabular}{",
+    "    l",
+    "    l",
+    "    S[table-format=1.3]",
+    "    S[table-format=-1.2]",
+    "    l",
+    "}",
+    "\\toprule",
+    "\\textbf{Variable} & \\textbf{Coef (95\\% CI)} & {\\textbf{SE}} & {\\textbf{z}} & {\\textbf{Pr$(>|z|)$}} \\\\",
+    "\\midrule",
+    rows,
+    "\\bottomrule",
+    "\\multicolumn{5}{l}{\\textsl{Significance codes: p $<$ 0.001 (***), p $<$ 0.01 (**), p $<$ 0.05 (*)}} \\\\",
+    "\\end{tabular}",
+    paste0("\\label{", label, "}"),
+    "\\end{table}"
+  ), paste0("tables/", label, ".tex"))
+}
+
+
+
+write_reduced_cox_table(
+  result_cox,
+  "Reduced Cox proportional hazards model results",
+  "reduced_cox"
+)
+
+write_reduced_aft_table(
+  result_llogis,
+  "Reduced log-logistic accelerated failure-time model results",
+  "reduced_loglogistic"
+)
+
+write_reduced_aft_table(
+  result_weibull,
+  "Reduced Weibull accelerated failure-time model results",
+  "reduced_weibull"
+)
+
+write_reduced_gengamma_table(
+  result_gengamma,
+  "Reduced generalized gamma survival model results",
+  "reduced_gengamma"
+)
+
 
 
 
